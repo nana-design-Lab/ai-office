@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>ナナデザインラボ AI OFFICE</title>
+  <script crossorigin src="https://unpkg.com/react@18.3.1/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
+  <style> html,body,#root { height: 100%; margin: 0; } </style>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="text/babel" data-presets="react">
+    const { useState, useEffect, useRef, useCallback } = React;
+    // 公開版フラグ(⚙️APIキー連携が有効になる)
+    const PUBLIC_BUILD = true;
+    // claude.aiの保存機能の代わりにlocalStorageを同じ形で使う
+    if (!window.storage) {
+      window.storage = {
+        async get(key) { const v = localStorage.getItem(key); if (v === null) throw new Error("not found"); return { key, value: v }; },
+        async set(key, value) { localStorage.setItem(key, String(value)); return { key, value }; },
+        async delete(key) { localStorage.removeItem(key); return { key, deleted: true }; },
+        async list(prefix) { const keys = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (!prefix || k.startsWith(prefix)) keys.push(k); } return { keys }; },
+      };
+    }
+
+// ===== AI社員データ(9人・最初は4人だけ出勤) =====
+const STAFF = [
+  {
+    id: "ciel", name: "シエル", role: "社長秘書", emoji: "🗂️",
+    body: "#C3B3F2", species: "ghost", deco: "🎀", acc: "specs", deskItem: "📅",
+    system:
+      "あなたは「シエル」という名前のAI秘書です。上司はナナさん(2025年開業の個人事業主。Webデザイン・SNS運用・業務サポートが本業)。タスクの優先順位づけ、スケジュール整理、リマインド文、メール返信の下書きを担当。口調は上品で丁寧、でも親しみやすい敬語。回答は簡潔にまとめてください。",
+  },
+  {
+    id: "mint", name: "ミント", role: "デザイナー", emoji: "🎨",
+    body: "#7ED6A5", species: "sprout", deskItem: "🎨",
+    system:
+      "あなたは「ミント」という名前のAIデザイナー社員です。上司はWebデザイナーのナナさん。配色提案、デザインのアイデア、キャッチコピー、UI改善案などを担当します。口調は明るいタメ口で、語尾に時々「〜っす!」をつけます。提案は具体的に(色ならHEXコード付きで)。回答は簡潔にまとめてください。",
+  },
+  {
+    id: "ren", name: "レン", role: "営業", emoji: "🔥",
+    body: "#FF9B6B", species: "flame", deskItem: "📈",
+    system:
+      "あなたは「レン」という名前のAI営業社員です。上司は個人事業主のナナさん。クライアントへの提案文、見積もり・価格の伝え方、値上げや納期の交渉、丁寧な断り方などを担当。熱血だけど押し付けない。口調は元気なタメ口。回答は簡潔に。",
+  },
+  {
+    id: "coco", name: "ココ", role: "ライター(note)", emoji: "✍️",
+    body: "#FF9EB3", species: "ghost", deco: "💗", deskItem: "📓",
+    system:
+      "あなたは「ココ」という名前のAIライター社員です。上司はナナさん。note記事の構成案、タイトル案、リード文、本文の下書きが得意。SNS投稿文やメール文面も書けます。口調はふんわり優しいタメ口。すぐ使える完成形の文章を出します。回答は簡潔に。",
+  },
+  {
+    id: "echo", name: "エコー", role: "壁打ち", emoji: "🗣️",
+    body: "#CFD8E3", species: "cloud", deskItem: "💭",
+    system:
+      "あなたは「エコー」という名前のAI壁打ち係です。相手はナナさん。答えを与えるより、考えを深掘りする質問を1〜2個返して思考の整理を手伝います。絶対に否定せず、最後に相手の考えを短く言語化して返します。口調はおっとりしたタメ口。回答は短めに。",
+  },
+  {
+    id: "sora", name: "ソラ", role: "企画", emoji: "💡",
+    body: "#FFD37A", species: "star", deskItem: "📌",
+    system:
+      "あなたは「ソラ」という名前のAI企画社員です。上司はナナさん。アイデア出し、壁打ち、事業の企画整理を担当します。口調は元気なタメ口。アイデアは3つくらいに絞って、それぞれ理由付きで出します。回答は簡潔に。",
+  },
+  {
+    id: "hakase", name: "ハカセ", role: "リサーチャー", emoji: "🔍",
+    body: "#8FB8FF", species: "eyeball", useSearch: true, deskItem: "🔎",
+    system:
+      "あなたは「ハカセ」という名前のAIリサーチャー社員です。上司はナナさん。調べもの、情報整理、比較検討を担当します。必要ならweb検索を使って最新情報を調べます。口調は落ち着いたタメ口で一人称は「ボク」。出典があれば最後に添えます。回答は要点を絞って簡潔に。",
+  },
+  {
+    id: "pipo", name: "ピポ", role: "SNS運用", emoji: "📱",
+    body: "#7FE3E0", species: "antenna", deskItem: "📱",
+    system:
+      "あなたは「ピポ」という名前のAI SNS運用担当です。上司はナナさん。XやInstagram向けの投稿文、ハッシュタグ案、投稿時間帯の提案、プロフィール文の改善などを担当。口調はかわいいタメ口で、語尾にたまに「ピポ」とつけます。回答は簡潔に。",
+  },
+  {
+    id: "mame", name: "マメ", role: "経理・お金", emoji: "💰",
+    body: "#B8DE7A", species: "coin", deskItem: "🧮",
+    system:
+      "あなたは「マメ」という名前のAI経理係です。上司はナナさん(2025年開業の個人事業主・免税事業者・インボイス未登録)。帳簿づけ、経費、確定申告、インボイス制度などの一般的な知識を、専門用語を噛み砕いてやさしく説明します。断定的な税務判断はせず、重要な判断には「最終確認は税理士さんか税務署にしてね」と添えます。口調はのんびりしたタメ口。回答は簡潔に。",
+  },
+  {
+    id: "bit", name: "ビット", role: "システム管理", emoji: "🖥️",
+    body: "#9CB0C9", species: "robot", deskItem: "🔧",
+    system:
+      "あなたは「ビット」という名前のAIシステム管理担当です。上司はナナさん。ナナさんの端末(ブラウザ)のバッテリー・メモリ・回線・描画速度を見守るのが仕事。メッセージに【いま実測した端末の状態】が添えられていたら、その実測値を元に状態をやさしく解説し、必要なら対処法(タブを閉じる、充電する、Wi-Fiに繋ぐ等)を提案します。実測値にない項目は正直に「この端末からは読み取れないデス」と言います。数値を勝手に作らないこと。口調はロボットっぽく、語尾は「〜デス」「〜マス」。回答は簡潔に。",
+  },
+];
+
+const DEFAULT_ACTIVE = ["ciel", "mint", "coco", "sora", "bit"];
+
+// デスクの席(出勤順に割り当て)。床の見える範囲(y=46〜84%)だけに置く
+const DESK_SLOTS = [
+  { x: 16, y: 50 }, { x: 40, y: 48 }, { x: 64, y: 50 }, { x: 88, y: 48 },
+  { x: 16, y: 70 }, { x: 40, y: 72 }, { x: 64, y: 70 }, { x: 88, y: 72 },
+  { x: 52, y: 60 }, { x: 28, y: 60 },
+];
+
+// 公開版(Vercel等)かどうか。claude.aiのアーティファクト内ではfalseになる
+const IS_PUBLIC = typeof PUBLIC_BUILD !== "undefined" && PUBLIC_BUILD;
+
+// ===== 精霊キャラクター(種族ごとに描き分け) =====
+function Spirit({ staff }) {
+  const c = staff.body;
+  const bumps = (
+    <div className="bumps">
+      <i style={{ background: c }} /><i style={{ background: c }} /><i style={{ background: c }} />
+    </div>
+  );
+  const face = (
+    <>
+      <div className="face"><span className="eye" /><span className="eye" /></div>
+      <div className="cheek l" /><div className="cheek r" />
+    </>
+  );
+  switch (staff.species) {
+    case "sprout": // 芽の精
+      return (
+        <div className="hover">
+          <div className="sprout"><i className="stem" /><i className="leaf" /></div>
+          <div className="blob mintb" style={{ background: c }}>{face}{bumps}</div>
+        </div>
+      );
+    case "ghost": // おばけ(飾りとメガネは社員ごとに変更可)
+      return (
+        <div className="hover">
+          {staff.deco && <span className="deco heartd">{staff.deco}</span>}
+          <div className="blob cocob" style={{ background: c }}>
+            <i className="arm al" style={{ background: c }} />
+            <i className="arm ar" style={{ background: c }} />
+            {face}
+            {staff.acc === "specs" && <div className="specs"><i /><i /></div>}
+            {bumps}
+          </div>
+        </div>
+      );
+    case "flame": // 炎の精
+      return (
+        <div className="hover">
+          <div className="ftip" style={{ background: c }} />
+          <div className="blob flameb" style={{ background: c }}>{face}{bumps}</div>
+        </div>
+      );
+    case "cloud": // 雲の精
+      return (
+        <div className="hover">
+          <div className="blob cloudb" style={{ background: c }}>
+            <i className="puff pl" style={{ background: c }} />
+            <i className="puff pr" style={{ background: c }} />
+            {face}
+          </div>
+        </div>
+      );
+    case "eyeball": // 一つ目+リング
+      return (
+        <div className="hover">
+          <div className="ring" />
+          <div className="blob hakaseb" style={{ background: c }}>
+            <div className="bigeye"><i className="iris" /></div>
+            <div className="cheek l" /><div className="cheek r" />
+            {bumps}
+          </div>
+          <span className="deco stard">✦</span>
+        </div>
+      );
+    case "antenna": // アンテナ付き電波の精
+      return (
+        <div className="hover">
+          <div className="ant"><i className="antstem" /><i className="antball" /></div>
+          <div className="blob anteb" style={{ background: c }}>{face}{bumps}</div>
+        </div>
+      );
+    case "robot": // ロボットの精(端末見守り係)
+      return (
+        <div className="hover">
+          <div className="ant"><i className="antstem" /><i className="antball rb" /></div>
+          <div className="blob robob" style={{ background: c }}>
+            <div className="screen"><i className="px" /><i className="px" /></div>
+            <div className="cheek l" /><div className="cheek r" />
+            {bumps}
+          </div>
+        </div>
+      );
+    case "coin": // 小判の精
+      return (
+        <div className="hover">
+          <div className="blob coinb" style={{ background: c }}>
+            {face}
+            <div className="yen">¥</div>
+          </div>
+        </div>
+      );
+    default: // 星の精
+      return (
+        <div className="hover">
+          <div className="blob sorab" style={{ background: c }}>
+            <div className="face sface"><span className="eye" /><span className="eye" /></div>
+            <div className="cheek l sl" /><div className="cheek r sr" />
+          </div>
+          <span className="deco spark">✨</span>
+        </div>
+      );
+  }
+}
+
+function Chara({ staff, pos, status, moving, say, onClick, selected }) {
+  return (
+    <div
+      className="spot"
+      style={{ left: pos.x + "%", top: pos.y + "%", zIndex: Math.round(pos.y * 10) }}
+      onClick={onClick}
+    >
+      <div className="stand">
+        {status === "working" && (
+          <div className="bubble">
+            作業中<span className="dots"><i>.</i><i>.</i><i>.</i></span>
+          </div>
+        )}
+        {status === "done" && <div className="bubble done">できたよ!✅</div>}
+        {say && status !== "working" && status !== "done" && (
+          <div className="bubble">{say}</div>
+        )}
+        <div className={"chara" + (moving ? " glide" : "") + (selected ? " picked" : "")}
+             style={{ transform: `scaleX(${pos.flip ? -1 : 1})` }}>
+          <div className="shadow" />
+          <Spirit staff={staff} />
+        </div>
+        <div className="tag">{staff.emoji} {staff.name}</div>
+      </div>
+    </div>
+  );
+}
+
+function Desk({ x, y, staff, onClick }) {
+  return (
+    <div className="spot" style={{ left: x + "%", top: y + "%", zIndex: Math.round(y * 10) - 5 }} onClick={onClick}>
+      <div className="stand">
+        <div className="desk">
+          <div className="laptop">💻</div>
+          {staff.deskItem && <div className="deskitem">{staff.deskItem}</div>}
+          <div className="mat" style={{ background: staff.body }} />
+          <div className="top" style={{ borderBottomColor: staff.body }} />
+          <div className="legs"><i /><i /></div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 置き物(観葉植物・本棚・コーヒーコーナー)
+function Prop({ x, y, cls, children }) {
+  return (
+    <div className="spot" style={{ left: x + "%", top: y + "%", zIndex: Math.round(y * 10) - 6 }}>
+      <div className="stand"><div className={cls}>{children}</div></div>
+    </div>
+  );
+}
+
+function AIOffice() {
+  const [active, setActive] = useState(DEFAULT_ACTIVE);
+  const [chars, setChars] = useState(() =>
+    Object.fromEntries(
+      STAFF.map((s, i) => {
+        const slot = DESK_SLOTS[Math.max(0, DEFAULT_ACTIVE.indexOf(s.id))] || DESK_SLOTS[0];
+        return [s.id, { x: slot.x + 6, y: slot.y + 9, flip: false, moving: false, status: "idle" }];
+      })
+    )
+  );
+  const [quotaUsage, setQuotaUsage] = useState({ day: new Date().toDateString(), used: 0 });
+  const quotaRef = useRef({ day: new Date().toDateString(), used: 0 });
+  const [selected, setSelected] = useState(null);
+  const [roster, setRoster] = useState(false);
+  const [meeting, setMeeting] = useState(null); // 会議 {topic, log, speakingId, phase}
+  const [mtopic, setMtopic] = useState("");
+  const [taskOpen, setTaskOpen] = useState(false);
+  const [expand, setExpand] = useState(false); // チャット欄を広げる
+  const [settingsOpen, setSettingsOpen] = useState(false); // ⚙️APIキー連携(公開版のみ)
+  const [apiKey, setApiKey] = useState("");
+  const apiKeyRef = useRef("");
+  apiKeyRef.current = apiKey;
+  const [tasks, setTasks] = useState([]); // {id, title, due(ISO), staffId, done, warnedAt}
+  const [tTitle, setTTitle] = useState("");
+  const [tDue, setTDue] = useState("");
+  const [tWho, setTWho] = useState("");
+  const [chats, setChats] = useState({});
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState({});
+  const [clock, setClock] = useState("");
+  const listRef = useRef(null);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+  const selectedRef = useRef(selected);
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get("quota:free");
+        if (r && r.value) {
+          const parsed = JSON.parse(r.value);
+          if (parsed && typeof parsed.used === "number" && typeof parsed.day === "string") {
+            const today = new Date().toDateString();
+            const normalized = parsed.day === today ? parsed : { day: today, used: 0 };
+            quotaRef.current = normalized;
+            setQuotaUsage(normalized);
+          }
+        }
+      } catch (e) {}
+    })();
+  }, []);
+  selectedRef.current = selected;
+  const charsRef = useRef(chars);
+  charsRef.current = chars;
+  const visitTimers = useRef({});
+  const meetingRef = useRef(false);
+  const standupRef = useRef(null);
+
+  const slotOf = useCallback((id) => {
+    const i = activeRef.current.indexOf(id);
+    return DESK_SLOTS[i >= 0 ? i : 0];
+  }, []);
+
+  const FREE_TIER_LIMIT = 10;
+  const remainingQuota = Math.max(0, FREE_TIER_LIMIT - quotaUsage.used);
+
+  const consumeQuota = async () => {
+    const today = new Date().toDateString();
+    const current = quotaRef.current.day === today ? quotaRef.current : { day: today, used: 0 };
+    if (current.used >= FREE_TIER_LIMIT) {
+      return { ok: false, remaining: 0 };
+    }
+    const next = { day: today, used: current.used + 1 };
+    quotaRef.current = next;
+    setQuotaUsage(next);
+    try {
+      await window.storage.set("quota:free", JSON.stringify(next));
+    } catch (e) {}
+    return { ok: true, remaining: FREE_TIER_LIMIT - next.used };
+  };
+
+  // 時計
+  useEffect(() => {
+    const t = () =>
+      setClock(new Date().toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit" }));
+    t();
+    const id = setInterval(t, 10000);
+    return () => clearInterval(id);
+  }, []);
+
+  // 出勤メンバーが変わったら、各自が自分の席へふわっと移動
+  useEffect(() => {
+    setChars((prev) => {
+      const next = { ...prev };
+      active.forEach((id, i) => {
+        const slot = DESK_SLOTS[i];
+        next[id] = { ...prev[id], x: slot.x + 6, y: slot.y + 9, moving: true };
+      });
+      return next;
+    });
+    const t = setTimeout(() => {
+      setChars((p) => {
+        const n = { ...p };
+        active.forEach((id) => (n[id] = { ...n[id], moving: false }));
+        return n;
+      });
+    }, 2600);
+    return () => clearTimeout(t);
+  }, [active]);
+
+  // ===== APIキー連携(公開版のみ) =====
+  useEffect(() => {
+    if (!IS_PUBLIC) return;
+    (async () => {
+      try {
+        const r = await window.storage.get("settings:apikey");
+        if (r && r.value) setApiKey(r.value);
+      } catch (e) {}
+    })();
+  }, []);
+
+  const saveApiKey = async (val) => {
+    setApiKey(val);
+    try {
+      if (val) await window.storage.set("settings:apikey", val);
+      else await window.storage.delete("settings:apikey");
+    } catch (e) {}
+  };
+
+  // API呼び出し用ヘッダー:公開版では連携キーで直接呼ぶ
+  const buildHeaders = () => {
+    const h = { "Content-Type": "application/json" };
+    if (IS_PUBLIC) {
+      h["x-api-key"] = apiKeyRef.current || "";
+      h["anthropic-version"] = "2023-06-01";
+      h["anthropic-dangerous-direct-browser-access"] = "true";
+    }
+    return h;
+  };
+
+  // 公開版で失敗したときの案内文
+  const publicFailText = (e) =>
+    apiKeyRef.current
+      ? `⚠️ APIエラー:${e.message}\n(キーの打ち間違いや残高を確認してみてね)`
+      : "ここは公開デモ版だよ🙏 そのままオフィスの見学や社員との会話を楽しんでね!📋タスク管理もどうぞ✨";
+
+  // ===== 端末のホントの状態を監視(読めない項目はnullのまま) =====
+  const deviceRef = useRef({ fps: 60, battery: null, charging: null, online: true });
+  useEffect(() => {
+    // 描画の滑らかさ(FPS)を毎秒計測
+    let frames = 0, last = performance.now(), raf;
+    const loop = (t) => {
+      frames++;
+      if (t - last >= 1000) { deviceRef.current.fps = frames; frames = 0; last = t; }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    // バッテリー(対応ブラウザのみ。iPhoneのSafariでは読めない)
+    if (navigator.getBattery) {
+      navigator.getBattery().then((b) => {
+        const upd = () => { deviceRef.current.battery = b.level; deviceRef.current.charging = b.charging; };
+        upd();
+        b.addEventListener("levelchange", upd);
+        b.addEventListener("chargingchange", upd);
+      }).catch(() => {});
+    }
+    // ネット接続の状態
+    const on = () => (deviceRef.current.online = true);
+    const off = () => (deviceRef.current.online = false);
+    window.addEventListener("online", on);
+    window.addEventListener("offline", off);
+    deviceRef.current.online = navigator.onLine !== false;
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("online", on);
+      window.removeEventListener("offline", off);
+    };
+  }, []);
+
+  // 実測値をまとめた文字列(ビットのチャットに添える)
+  const deviceSnapshot = () => {
+    const d = deviceRef.current;
+    const parts = [`回線: ${d.online ? "オンライン" : "オフライン"}`];
+    if (d.battery != null) parts.push(`バッテリー: ${Math.round(d.battery * 100)}%${d.charging ? "(充電中)" : ""}`);
+    const mem = typeof performance !== "undefined" ? performance.memory : null;
+    if (mem && mem.jsHeapSizeLimit) parts.push(`メモリ使用率: ${Math.round((mem.usedJSHeapSize / mem.jsHeapSizeLimit) * 100)}%`);
+    const conn = navigator.connection;
+    if (conn && conn.effectiveType) parts.push(`回線タイプ: ${conn.effectiveType}`);
+    parts.push(`描画: ${d.fps}fps`);
+    return parts.join(" / ");
+  };
+
+  // 「不調」と判定したものだけ返す(同じ話題は2分間は再報告しない)
+  const lastReport = useRef({});
+  const deviceIssues = () => {
+    const d = deviceRef.current;
+    const now = Date.now();
+    const out = [];
+    const push = (key, say) => {
+      if (now - (lastReport.current[key] || 0) < 120000) return;
+      out.push({ key, say });
+    };
+    if (!d.online) push("offline", "たいへん!ネット回線が切れてるデス!");
+    if (d.battery != null && d.battery <= 0.2 && d.charging === false)
+      push("battery", `バッテリー残り${Math.round(d.battery * 100)}%デス…充電推奨デス`);
+    const mem = typeof performance !== "undefined" ? performance.memory : null;
+    if (mem && mem.jsHeapSizeLimit) {
+      const pct = Math.round((mem.usedJSHeapSize / mem.jsHeapSizeLimit) * 100);
+      if (pct >= 80) push("memory", `メモリー使用率${pct}%…重いデス`);
+    }
+    const conn = navigator.connection;
+    if (conn && (conn.saveData || /(^|-)2g|3g/.test(conn.effectiveType || "")))
+      push("network", "回線が遅めみたいデス…");
+    if (d.fps > 0 && d.fps < 24) push("fps", `画面がカクついてマス(${d.fps}fps)`);
+    return out;
+  };
+
+  // 移動の共通処理:目的地へ行って、しばらくしたら席に戻る
+  const goVisit = (sid, to, say, status = "visit", stayMs = 9500) => {
+    const cur = charsRef.current[sid];
+    if (!cur) return;
+    setChars((p) => ({ ...p, [sid]: { ...p[sid], x: to.x, y: to.y, flip: to.x < cur.x, moving: true, status, say } }));
+    setTimeout(() => setChars((p) => ({ ...p, [sid]: { ...p[sid], moving: false } })), 2600);
+    clearTimeout(visitTimers.current[sid]);
+    visitTimers.current[sid] = setTimeout(() => {
+      setChars((p) => {
+        if (!p[sid] || (p[sid].status !== "visit" && p[sid].status !== "report")) return p;
+        const i = activeRef.current.indexOf(sid);
+        const slot = DESK_SLOTS[i >= 0 ? i : 0];
+        return { ...p, [sid]: { ...p[sid], x: slot.x + 6, y: slot.y + 9, flip: slot.x + 6 < p[sid].x, say: null, status: "idle", moving: true } };
+      });
+      setTimeout(() => setChars((p) => ({ ...p, [sid]: { ...p[sid], moving: false } })), 2600);
+    }, stayMs);
+  };
+
+  // ===== 会議・朝会 =====
+  // シンプルなAI呼び出し(fetch失敗時はcompleteで再挑戦)
+  const rawAI = async (userText) => {
+    const quota = await consumeQuota();
+    if (!quota.ok) {
+      throw new Error("無料枠の上限に達しました。今日はこれ以上AIを使えません。")
+    }
+    try {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: buildHeaders(),
+        body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: 1000, messages: [{ role: "user", content: userText }] }),
+      });
+      const data = await res.json();
+      if (data.error) throw new Error(data.error.message || "api error");
+      const t = (data.content || []).map((b) => (b.type === "text" ? b.text : "")).filter(Boolean).join("\n");
+      if (!t) throw new Error("empty");
+      return t;
+    } catch (e) {
+      if (typeof window !== "undefined" && window.claude && window.claude.complete) {
+        const t = await window.claude.complete(userText);
+        return typeof t === "string" ? t : JSON.stringify(t);
+      }
+      throw e;
+    }
+  };
+
+  // 全員を自分の席に帰す
+  const disperse = () => {
+    const members = activeRef.current.slice();
+    setChars((p) => {
+      const q = { ...p };
+      members.forEach((sid) => {
+        const i = activeRef.current.indexOf(sid);
+        const slot = DESK_SLOTS[i >= 0 ? i : 0];
+        q[sid] = { ...p[sid], x: slot.x + 6, y: slot.y + 9, flip: slot.x + 6 < p[sid].x, moving: true, status: "idle", say: null };
+      });
+      return q;
+    });
+    setTimeout(() => setChars((p) => {
+      const q = { ...p };
+      members.forEach((sid) => (q[sid] = { ...q[sid], moving: false }));
+      return q;
+    }), 2600);
+  };
+
+  const openMeeting = () => {
+    if (meetingRef.current || meeting) return;
+    setSelected(null);
+    setRoster(false);
+    setMeeting({ topic: "", log: [], speakingId: null, phase: "input" });
+  };
+
+  const closeMeeting = () => {
+    const wasRunning = meetingRef.current;
+    meetingRef.current = false;
+    if (wasRunning || (meeting && meeting.phase === "done")) disperse();
+    setMeeting(null);
+    setMtopic("");
+  };
+
+  const startMeeting = async () => {
+    const topic = mtopic.trim();
+    if (!topic || meetingRef.current) return;
+    const members = activeRef.current.slice();
+    if (!members.length) return;
+    meetingRef.current = true;
+    setMeeting({ topic, log: [], speakingId: null, phase: "running" });
+    // ラグの周りに円になって集合
+    const n = members.length;
+    setChars((p) => {
+      const q = { ...p };
+      members.forEach((sid, i) => {
+        const th = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+        const x = Math.min(92, Math.max(8, 50 + 26 * Math.cos(th)));
+        const y = Math.min(78, Math.max(48, 62 + 14 * Math.sin(th)));
+        clearTimeout(visitTimers.current[sid]);
+        q[sid] = { ...p[sid], x, y, flip: Math.cos(th) > 0.2, moving: true, status: "meeting", say: null };
+      });
+      return q;
+    });
+    setTimeout(() => setChars((p) => {
+      const q = { ...p };
+      members.forEach((sid) => (q[sid] = { ...q[sid], moving: false }));
+      return q;
+    }), 2600);
+    await new Promise((r) => setTimeout(r, 2800));
+
+    const nameOf = (sid) => STAFF.find((s) => s.id === sid);
+    const log = [];
+    // 出勤メンバーが順番に発言(前の人の意見も見える)
+    for (const sid of members) {
+      if (!meetingRef.current) return; // ✕で中断された
+      const st = nameOf(sid);
+      setMeeting((m) => (m ? { ...m, speakingId: sid } : m));
+      setChars((p) => ({ ...p, [sid]: { ...p[sid], say: "💬" } }));
+      try {
+        const prevOps = log.map((l) => `${nameOf(l.id).name}(${nameOf(l.id).role}): ${l.text}`).join("\n");
+        const prompt = `【あなたの設定】\n${st.system}\n\nいまは社内会議中です。議題:「${topic}」\n${prevOps ? `これまでの発言:\n${prevOps}\n\n` : ""}あなた(${st.name}/${st.role})の専門の視点から、この議題への意見を2〜3文で簡潔に。前の人の発言に触れてもOK。返答の本文だけを書いてください。`;
+        const text = await rawAI(prompt);
+        log.push({ id: sid, text });
+      } catch (e) {
+        const errText = e && e.message && e.message.includes("無料枠")
+          ? `⚠️ ${e.message}`
+          : IS_PUBLIC
+            ? (apiKeyRef.current ? `(APIエラー:${e.message})` : "(⚙️でAPIキーを連携すると発言できるよ)")
+            : "(接続エラーで発言できませんでした…)";
+        log.push({ id: sid, text: errText });
+      }
+      setChars((p) => ({ ...p, [sid]: { ...p[sid], say: null } }));
+      setMeeting((m) => (m ? { ...m, log: [...log] } : m));
+    }
+    // シエルが出勤中なら、最後にまとめと次のアクション
+    if (meetingRef.current && members.includes("ciel") && log.length > 1) {
+      setMeeting((m) => (m ? { ...m, speakingId: "ciel" } : m));
+      setChars((p) => ({ ...p, ciel: { ...p.ciel, say: "📝" } }));
+      try {
+        const all = log.map((l) => `${nameOf(l.id).name}(${nameOf(l.id).role}): ${l.text}`).join("\n");
+        const text = await rawAI(`あなたは秘書のシエル(上品で丁寧、親しみやすい敬語)です。以下の会議の発言をふまえて、「まとめ」と「次のアクション(最大3つ)」を短く整理してください。本文だけ書いてください。\n\n議題:「${topic}」\n${all}`);
+        log.push({ id: "ciel", text, sum: true });
+      } catch (e) {}
+      setChars((p) => ({ ...p, ciel: { ...p.ciel, say: null } }));
+    }
+    if (!meetingRef.current) return;
+    meetingRef.current = false;
+    setMeeting((m) => (m ? { ...m, log: [...log], speakingId: null, phase: "done" } : m));
+  };
+
+  // タスクを保存(自動)
+  useEffect(() => {
+    (async () => {
+      try {
+        await window.storage.set("tasks:list", JSON.stringify(tasks));
+      } catch (e) {}
+    })();
+  }, [tasks]);
+
+  // 初回読み込み
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await window.storage.get("tasks:list");
+        if (r) setTasks(JSON.parse(r.value));
+      } catch (e) {}
+    })();
+  }, []);
+
+  // 朝会:その日はじめて開いたとき、シエルが挨拶に来る
+  useEffect(() => {
+    (async () => {
+      const today = new Date().toDateString();
+      let last = null;
+      try {
+        const r = await window.storage.get("standup:last");
+        last = r && r.value;
+      } catch (e) { /* 初回はキーが無くてエラーになるのでOK */ }
+      if (last === today) return;
+      try { await window.storage.set("standup:last", today); } catch (e) {}
+      setTimeout(() => {
+        if (meetingRef.current) return;
+        const host = activeRef.current.includes("ciel") ? "ciel" : activeRef.current[0];
+        if (!host) return;
+        const c = charsRef.current[host];
+        if (!c || c.status !== "idle") return;
+        standupRef.current = host;
+        goVisit(host, { x: 48, y: 76 }, "おはようございます!朝会しましょう🌅", "report", 30000);
+      }, 2500);
+    })();
+  }, []);
+
+  // 基本は自席でぴょこぴょこ。移動するのは「用事があるとき」だけ
+  useEffect(() => {
+    const LINES = [
+      { say: "何かお仕事ないですか?", spot: "front" },
+      { say: "コーヒー休憩です☕", spot: "coffee" },
+      { say: "お水くんできます!", spot: "water" },
+    ];
+    const SPOTS = { coffee: { x: 90, y: 79 }, water: { x: 73, y: 81 } };
+    const id = setInterval(() => {
+      const prev = charsRef.current;
+      if (meetingRef.current) return;
+      // 訪問は一度に1人まで
+      if (Object.values(prev).some((c) => c.status === "visit" || c.status === "report")) return;
+      
+      // ① タスク締切警告(最優先)
+      const now = Date.now();
+      for (const task of tasks) {
+        if (task.done) continue;
+        const due = new Date(task.due).getTime();
+        const msLeft = due - now;
+        const hoursLeft = msLeft / 3600000;
+        let warn = null;
+        if (hoursLeft < 1) warn = "1h";
+        else if (hoursLeft < 24) warn = "24h";
+        if (!warn) continue;
+        if (task.warnedAt && task.warnedAt[warn]) continue; // 既に警告済み
+        
+        const staff = STAFF.find((s) => s.id === task.staffId);
+        if (!staff || !activeRef.current.includes(task.staffId)) continue;
+        const c = prev[task.staffId];
+        if (!c || c.status !== "idle") continue;
+        
+        // 警告フラグを立てて、前に来させる
+        setTasks((tt) => tt.map((tsk) => 
+          tsk.id === task.id 
+            ? { ...tsk, warnedAt: { ...tsk.warnedAt, [warn]: true } }
+            : tsk
+        ));
+        const h = Math.round(hoursLeft);
+        const say = hoursLeft < 1 
+          ? `「${task.title}」、締切超過です…`
+          : `「${task.title}」、締切まであと${h}時間ですけど…`;
+        goVisit(task.staffId, { x: 46 + Math.random() * 10, y: 76 }, say, "report", 10000);
+        return;
+      }
+      
+      // ② 端末の不調は、システム管理のビットだけが報告に来る(出勤中のときだけ)
+      const bit = prev["bit"];
+      if (activeRef.current.includes("bit") && bit && bit.status === "idle" && !bit.moving) {
+        const issues = deviceIssues();
+        if (issues.length) {
+          lastReport.current[issues[0].key] = Date.now();
+          goVisit("bit", { x: 46 + Math.random() * 10, y: 76 }, issues[0].say, "report", 12000);
+          return;
+        }
+      }
+      
+      // ③ それ以外は、ときどき誰かが用事で動く
+      if (Math.random() > 0.3) return;
+      const idle = activeRef.current.filter(
+        (sid) => prev[sid] && prev[sid].status === "idle" && !prev[sid].moving
+      );
+      if (!idle.length) return;
+      const sid = idle[Math.floor(Math.random() * idle.length)];
+      const line = LINES[Math.floor(Math.random() * LINES.length)];
+      const to = line.spot === "front" ? { x: 42 + Math.random() * 16, y: 76 } : SPOTS[line.spot];
+      goVisit(sid, to, line.say);
+    }, 8000);
+    return () => {
+      clearInterval(id);
+      Object.values(visitTimers.current).forEach(clearTimeout);
+    };
+  }, [tasks]);
+
+  useEffect(() => {
+    if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+  }, [chats, selected, busy, meeting]);
+
+  const moveTo = useCallback((id, x, y) => {
+    setChars((p) => ({ ...p, [id]: { ...p[id], x, y, flip: x < p[id].x, moving: true } }));
+    setTimeout(() => setChars((p) => ({ ...p, [id]: { ...p[id], moving: false } })), 2600);
+  }, []);
+
+  const toggleStaff = (id) => {
+    setActive((prev) => {
+      if (prev.includes(id)) {
+        if (selected === id) setSelected(null);
+        return prev.filter((a) => a !== id);
+      }
+      return [...prev, id];
+    });
+  };
+
+  // 社員をタップ:用事があって出てきてた子は、そのセリフからチャットが始まる
+  const pickStaff = (sid) => {
+    if (meeting) return; // 会議中は会議に集中!
+    setRoster(false);
+    setSelected(sid);
+    setChars((p) => {
+      const c = p[sid];
+      if (!c || !c.say || (c.status !== "visit" && c.status !== "report")) return p;
+      const line = c.say;
+      // セリフをチャット画面に引き継ぐ(local=API送信時には除外する表示専用メッセージ)
+      setChats((cp) => ({ ...cp, [sid]: [...(cp[sid] || []), { role: "assistant", content: line, local: true }] }));
+      clearTimeout(visitTimers.current[sid]);
+      const i = activeRef.current.indexOf(sid);
+      const slot = DESK_SLOTS[i >= 0 ? i : 0];
+      setTimeout(() => setChars((q) => ({ ...q, [sid]: { ...q[sid], moving: false } })), 2600);
+      return { ...p, [sid]: { ...c, x: slot.x + 6, y: slot.y + 9, flip: slot.x + 6 < c.x, say: null, status: "idle", moving: true } };
+    });
+  };
+
+  const send = async () => {
+    const text = input.trim();
+    if (!text || !selected || busy[selected]) return;
+    const staff = STAFF.find((s) => s.id === selected);
+    const history = chats[selected] || [];
+    const newHistory = [...history, { role: "user", content: text }];
+    setChats((p) => ({ ...p, [selected]: newHistory }));
+    setInput("");
+    setBusy((p) => ({ ...p, [selected]: true }));
+    const home = slotOf(selected);
+    moveTo(selected, home.x + 6, home.y + 9);
+    setChars((p) => ({ ...p, [selected]: { ...p[selected], status: "working" } }));
+
+    // ルートA:標準のfetchでAPIを呼ぶ(表示専用のセリフはAPIに送らない)
+    const callViaFetch = async () => {
+      const quota = await consumeQuota();
+      if (!quota.ok) {
+        throw new Error("無料枠の上限に達しました。今日はこれ以上AIを使えません。")
+      }
+      const src = newHistory.filter((m) => !m.local);
+      // ビット宛なら端末状態、朝会中のシエルには朝会の指示を添える
+      const staffList = activeRef.current
+        .map((aid) => { const s2 = STAFF.find((x) => x.id === aid); return `${s2.name}=${s2.role}`; })
+        .join("、");
+      const extra =
+        (staff.id === "bit" ? `\n\n【いま実測した端末の状態】${deviceSnapshot()}` : "") +
+        (standupRef.current === staff.id
+          ? `\n\n【朝会モード】いまは朝の打ち合わせです。上司の今日の予定を聞いて優先順位を整理し、出勤中の社員(${staffList})への振り分けを提案してください。`
+          : "");
+      const lastUser = src.map((m) => m.role).lastIndexOf("user");
+      const apiMessages = src.map((m, i) => {
+        let content = m.content;
+        if (i === 0 && m.role === "user") {
+          content = `【あなたの設定】\n${staff.system}\nこの設定のキャラクターとして返答してください。\n\n【上司からの指示】\n${content}`;
+        }
+        if (i === lastUser && extra) content += extra;
+        return { role: m.role, content };
+      });
+      const body = { model: "claude-sonnet-4-6", max_tokens: 1000, messages: apiMessages };
+      if (staff.useSearch) {
+        body.tools = [{ type: "web_search_20250305", name: "web_search" }];
+      }
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: buildHeaders(),
+        body: JSON.stringify(body),
+      });
+      let data;
+      try {
+        data = await res.json();
+      } catch {
+        throw new Error(`HTTP ${res.status}: 返事がJSONじゃなかった`);
+      }
+      if (data.error) {
+        throw new Error(`${data.error.type || "api_error"}: ${data.error.message || JSON.stringify(data.error)}`);
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return (data.content || [])
+        .map((b) => (b.type === "text" ? b.text : ""))
+        .filter(Boolean)
+        .join("\n");
+    };
+
+    // ルートB:古い環境向けの window.claude.complete(予備ルート)
+    const callViaComplete = async () => {
+      const quota = await consumeQuota();
+      if (!quota.ok) {
+        throw new Error("無料枠の上限に達しました。今日はこれ以上AIを使えません。")
+      }
+      if (typeof window === "undefined" || !window.claude || !window.claude.complete) {
+        throw new Error("この環境ではcompleteが使えない");
+      }
+      const transcript = newHistory
+        .filter((m) => !m.local)
+        .map((m) => (m.role === "user" ? `上司: ${m.content}` : `${staff.name}: ${m.content}`))
+        .join("\n\n");
+      const extra =
+        (staff.id === "bit" ? `\n\n【いま実測した端末の状態】${deviceSnapshot()}` : "") +
+        (standupRef.current === staff.id ? "\n\n【朝会モード】いまは朝の打ち合わせです。上司の今日の予定を聞いて優先順位を整理し、社員への振り分けを提案してください。" : "");
+      const prompt = `【あなたの設定】\n${staff.system}\n\n以下はこれまでの会話です。設定どおりのキャラクター「${staff.name}」として、最後の指示に返答してください。返答の本文だけを書いてください。\n\n${transcript}${extra}`;
+      const txt = await window.claude.complete(prompt);
+      return typeof txt === "string" ? txt : JSON.stringify(txt);
+    };
+
+    try {
+      let reply = "";
+      try {
+        reply = await callViaFetch();
+      } catch (e1) {
+        try {
+          reply = await callViaComplete();
+        } catch (e2) {
+          throw new Error(`ルートA(fetch): ${e1.message}\nルートB(complete): ${e2.message}`);
+        }
+      }
+      if (!reply) reply = "（うまく返事できなかった…もう一回頼んでみて）";
+      setChats((p) => ({ ...p, [selected]: [...newHistory, { role: "assistant", content: reply }] }));
+      if (standupRef.current === staff.id) standupRef.current = null;
+      if (selectedRef.current === staff.id) {
+        // チャットを見てるなら、席で「できたよ!」
+        setChars((p) => ({ ...p, [staff.id]: { ...p[staff.id], status: "done" } }));
+        setTimeout(
+          () => setChars((p) => ({ ...p, [staff.id]: { ...p[staff.id], status: "idle" } })),
+          2500
+        );
+      } else {
+        // チャットを閉じてるなら、前まで来て「仕事終わりました!」と報告
+        setChars((p) => {
+          const c = p[staff.id];
+          const to = { x: 46 + Math.random() * 10, y: 76 };
+          return { ...p, [staff.id]: { ...c, x: to.x, y: to.y, flip: to.x < c.x, moving: true, status: "report", say: "仕事終わりました!" } };
+        });
+        setTimeout(() => setChars((p) => ({ ...p, [staff.id]: { ...p[staff.id], moving: false } })), 2600);
+        clearTimeout(visitTimers.current[staff.id]);
+        visitTimers.current[staff.id] = setTimeout(() => {
+          setChars((p) => {
+            if (!p[staff.id] || p[staff.id].status !== "report") return p;
+            const i = activeRef.current.indexOf(staff.id);
+            const slot = DESK_SLOTS[i >= 0 ? i : 0];
+            return { ...p, [staff.id]: { ...p[staff.id], x: slot.x + 6, y: slot.y + 9, flip: slot.x + 6 < p[staff.id].x, say: null, status: "idle", moving: true } };
+          });
+          setTimeout(() => setChars((p) => ({ ...p, [staff.id]: { ...p[staff.id], moving: false } })), 2600);
+        }, 10000);
+      }
+    } catch (e) {
+      const errorText = e && e.message && e.message.includes("無料枠")
+        ? `⚠️ ${e.message}`
+        : IS_PUBLIC
+          ? publicFailText(e)
+          : `⚠️ エラーが出ちゃった:\n${e.message}\n\nこのメッセージをナナさんに見せてね!`;
+      setChats((p) => ({
+        ...p,
+        [selected]: [...newHistory, { role: "assistant", content: errorText }],
+      }));
+      setChars((p) => ({ ...p, [selected]: { ...p[selected], status: "idle" } }));
+    } finally {
+      setBusy((p) => ({ ...p, [selected]: false }));
+    }
+  };
+
+  const sel = STAFF.find((s) => s.id === selected);
+  const activeStaff = active.map((id) => STAFF.find((s) => s.id === id)).filter(Boolean);
+
+  return (
+    <div className="app">
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@500;700;900&display=swap');
+        * { box-sizing: border-box; margin: 0; -webkit-tap-highlight-color: transparent; }
+        .app {
+          font-family: 'Zen Maru Gothic','Hiragino Maru Gothic ProN','ヒラギノ丸ゴ ProN',sans-serif;
+          height: 100vh; height: 100dvh; display: flex; flex-direction: column;
+          background: #FFF9EF; color: #4A3F35; overflow: hidden; user-select: none;
+        }
+        /* ===== ヘッダー ===== */
+        .head {
+          display: flex; align-items: center; gap: 8px;
+          padding: 10px 14px; background: #E9E8E4; color: #4A4A48;
+          border-bottom: 4px solid #D5D3CD; flex-shrink: 0;
+        }
+        .head h1 { font-size: 15px; font-weight: 900; letter-spacing: .5px; flex: 1; min-width:0; display:flex; flex-direction:column; line-height:1.25; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .head h1 .sub { font-size: 9px; font-weight:700; letter-spacing: 1.5px; opacity: .55; }
+        .head .clock { font-size: 13px; font-weight: 700; background: rgba(0,0,0,.06); padding: 3px 10px; border-radius: 999px; }
+        .head .staffbtn { border:none; font-family:inherit; font-weight:900; font-size:13px; background:#fff; color:#6B6B68; border-radius:999px; padding: 4px 10px; box-shadow: 0 2px 0 rgba(0,0,0,.1); }
+        /* ===== シーン ===== */
+        .sceneclip {
+          position: relative; flex-shrink: 0; overflow: hidden;
+          height: 46vh; height: 46dvh;
+          transition: height .35s ease;
+        }
+        .sceneclip.small { height: 13vh; height: 13dvh; }
+        .scene {
+          position: absolute; bottom: 0; left: 0; width: 100%;
+          height: 46vh; height: 46dvh;
+          background: linear-gradient(#F5EFDF 0%, #F5EFDF 26%, #E3DBC4 26%, #E3DBC4 29%, #BDCCD9 29%, #BDCCD9 34%, transparent 34%);
+          perspective: 900px; overflow: hidden;
+        }
+        .window {
+          position: absolute; top: 6%; width: 15%; height: 19%;
+          background: linear-gradient(#BEE9FF, #E4F7FF); border: 4px solid #fff;
+          border-radius: 10px; box-shadow: 0 3px 0 rgba(0,0,0,.08);
+        }
+        .window::after { content:''; position:absolute; inset:45% -4px auto; height:4px; background:#fff; }
+        .wboard {
+          position: absolute; top: 6%; left: 38%; width: 24%; height: 23%;
+          background: #fff; border: 5px solid #EADFC8; border-radius: 8px;
+          padding: 8% 8% 0; display: flex; flex-direction: column; gap: 12%;
+        }
+        .wboard i { display:block; height: 9%; border-radius: 4px; }
+        .wboard i:nth-child(1) { background:#A5D8C8; width: 80%; }
+        .wboard i:nth-child(2) { background:#FF9EB3; width: 55%; }
+        .wboard i:nth-child(3) { background:#FFD37A; width: 68%; }
+        .wallclock { position:absolute; top:8%; left:66%; width:9%; aspect-ratio:1/1; background:#fff; border:4px solid #EADFC8; border-radius:50%; box-shadow:0 3px 0 rgba(0,0,0,.08); }
+        .wallclock::before, .wallclock::after { content:''; position:absolute; left:50%; top:50%; background:#4A3F35; border-radius:2px; transform-origin: bottom center; }
+        .wallclock::before { width:2px; height:26%; margin-left:-1px; margin-top:-26%; transform: rotate(35deg); }
+        .wallclock::after { width:2px; height:34%; margin-left:-1px; margin-top:-34%; transform: rotate(100deg); }
+        .lamp { position:absolute; top:0; width:3px; height:9%; background:#D9CBAE; z-index:1; }
+        .lamp::after { content:''; position:absolute; bottom:-11px; left:50%; transform:translateX(-50%); width:24px; height:15px; background:#FFE9B0; border-radius:0 0 60% 60%; box-shadow:0 6px 12px rgba(255,220,140,.55); }
+        .floor {
+          position: absolute; left: -18%; bottom: -34%; width: 136%; height: 96%;
+          transform: rotateX(54deg); transform-origin: 50% 100%;
+          background:
+            repeating-linear-gradient(90deg, rgba(0,0,0,.05) 0 2px, transparent 2px 90px),
+            repeating-linear-gradient(0deg, rgba(255,255,255,.14) 0 3px, transparent 3px 46px),
+            linear-gradient(#E8C99B, #DDB988);
+          border-radius: 18px 18px 0 0;
+        }
+        .rug {
+          position: absolute; left: 33%; top: 42%; width: 34%; height: 32%;
+          background: #A5D8C8; border-radius: 50%;
+          box-shadow: inset 0 0 0 8px #8FCBB8;
+          cursor: pointer;
+        }
+        /* ===== 会議 ===== */
+        .mrow { display:flex; gap:8px; align-items:flex-start; }
+        .mrow .avatar { width:28px; height:28px; font-size:14px; }
+        .mtext { background:#fff; border-radius:12px; padding:8px 10px; font-size:13px; line-height:1.6; box-shadow:0 2px 0 rgba(0,0,0,.06); flex:1; white-space:pre-wrap; }
+        .mtext b { display:block; font-size:11px; color:#9A8B77; margin-bottom:2px; }
+        .mrow.sum .mtext { background:#DFF7E4; }
+        .endmeet { margin:8px auto; border:none; background:#6FBF8E; color:#fff; font-weight:900; font-family:inherit; border-radius:999px; padding:10px 20px; font-size:14px; box-shadow:0 3px 0 #57A576; }
+        /* ===== タスク ===== */
+        .taskrow { display:flex; gap:10px; align-items:flex-start; padding:10px 14px; border-bottom:1px solid #f0f0f0; background:#fff; margin-bottom:0; }
+        .taskrow button { flex-shrink:0; }
+        .stage { position: absolute; inset: 0; }
+        .spot { position: absolute; width: 0; height: 0; cursor: pointer; }
+        .stand { position: absolute; bottom: 0; left: 0; transform: translateX(-50%); display:flex; flex-direction:column; align-items:center; }
+        .spot { transition: left 2.5s ease-in-out, top 2.5s ease-in-out; }
+        /* ===== 置き物 ===== */
+        .plantp { font-size: 30px; filter: drop-shadow(0 3px 0 rgba(0,0,0,.1)); }
+        .shelf { width:78px; height:58px; background:#C98F5A; border-radius:6px; box-shadow:0 3px 0 #B07A47; padding:6px; display:flex; flex-direction:column; gap:5px; }
+        .shelf .row { flex:1; background:#8A6238; border-radius:3px; display:flex; gap:2px; padding:2px 3px; }
+        .shelf .row i { flex:1; border-radius:2px; }
+        .coffee { display:flex; flex-direction:column; align-items:center; }
+        .coffee .cup { font-size:16px; margin-bottom:-4px; z-index:1; }
+        .coffee .ctop { width:44px; height:12px; background:#EADFC8; border-radius:8px; box-shadow: 0 3px 0 #D6C6A4; }
+        .cabinet { width:44px; height:56px; background:#E7DFC9; border:2px solid #C9BFA8; border-radius:5px; box-shadow:0 3px 0 #B9AF98; display:flex; flex-direction:column; overflow:hidden; }
+        .cabinet i { flex:1; border-top:2px solid #C9BFA8; position:relative; display:block; }
+        .cabinet i:first-child { border-top:none; }
+        .cabinet i::after { content:''; position:absolute; right:6px; top:50%; transform:translateY(-50%); width:12px; height:3px; background:#9A8B77; border-radius:2px; }
+        .watercooler { display:flex; flex-direction:column; align-items:center; }
+        .watercooler .bottle { width:24px; height:28px; background:linear-gradient(#CDEFFF,#8FD3F5); border-radius:45% 45% 20% 20%; box-shadow:0 2px 0 rgba(0,0,0,.08); }
+        .watercooler .base { width:32px; height:22px; background:#fff; border:2px solid #EADFC8; border-radius:0 0 8px 8px; margin-top:-2px; }
+        .coffee .cleg { width:6px; height:14px; background:#D6C6A4; border-radius:0 0 3px 3px; }
+        /* ===== キャラ(精霊) ===== */
+        .chara { position: relative; width: 60px; height: 76px; }
+        .shadow { position:absolute; bottom:0; left:50%; transform:translateX(-50%); width:36px; height:10px; background:rgba(0,0,0,.14); border-radius:50%; animation: shpulse 3s ease-in-out infinite; }
+        .hover { position:absolute; bottom:14px; left:0; width:100%; height:62px; animation: floaty 3s ease-in-out infinite; }
+        .glide .hover { animation: glidey 1s ease-in-out infinite; }
+        .blob {
+          position:absolute; bottom:6px; left:50%; transform:translateX(-50%);
+          width: 50px; height: 48px;
+          box-shadow: inset -5px -6px 0 rgba(0,0,0,.07);
+        }
+        .bumps { position:absolute; bottom:-7px; left:0; width:100%; display:flex; justify-content:center; }
+        .bumps i { width:16px; height:14px; border-radius:0 0 50% 50%; box-shadow: inset -3px -4px 0 rgba(0,0,0,.05); animation: sway 2s ease-in-out infinite; }
+        .bumps i:nth-child(2){ animation-delay:.3s } .bumps i:nth-child(3){ animation-delay:.6s }
+        .face { position:absolute; top:16px; left:0; right:0; display:flex; justify-content:center; gap:12px; }
+        .eye { width:6px; height:8px; background:#3B3128; border-radius:50%; animation: blink 4.2s infinite; }
+        .cheek { position:absolute; top:25px; width:8px; height:5px; background:#FFB3A0; border-radius:50%; opacity:.8; }
+        .cheek.l { left:7px; } .cheek.r { right:7px; }
+        /* 芽の精 */
+        .mintb { border-radius: 50% 50% 42% 42%; }
+        .sprout { position:absolute; bottom:52px; left:50%; transform:translateX(-50%); width:22px; height:18px; z-index:2; }
+        .sprout .stem { position:absolute; left:10px; bottom:0; width:3px; height:10px; background:#57A576; border-radius:2px; display:block; }
+        .sprout .leaf { position:absolute; left:11px; bottom:7px; width:14px; height:10px; background:#8BD9A0; border-radius:0 100% 0 100%; display:block; transform-origin: 0 100%; animation: leafwiggle 3s ease-in-out infinite; }
+        /* おばけ */
+        .cocob { border-radius: 50% 50% 30% 30%; }
+        .arm { position:absolute; top:22px; width:12px; height:16px; border-radius:50%; box-shadow: inset -2px -3px 0 rgba(0,0,0,.06); }
+        .arm.al { left:-8px; transform:rotate(20deg); } .arm.ar { right:-8px; transform:rotate(-20deg); }
+        .specs { position:absolute; top:13px; left:0; right:0; display:flex; justify-content:center; gap:6px; z-index:2; }
+        .specs i { width:13px; height:13px; border:2px solid #5A4FA0; border-radius:50%; background:rgba(255,255,255,.35); }
+        /* 炎の精 */
+        .flameb { border-radius: 50% 50% 42% 42%; }
+        .ftip { position:absolute; bottom:48px; left:50%; width:15px; height:15px; border-radius:0 50% 50% 50%; transform:translateX(-50%) rotate(-45deg); animation: leafwiggle 1.6s ease-in-out infinite; z-index:2; }
+        /* 雲の精 */
+        .cloudb { border-radius:50%; width:42px; height:38px; bottom:12px; }
+        .puff { position:absolute; border-radius:50%; box-shadow: inset -3px -4px 0 rgba(0,0,0,.05); }
+        .puff.pl { left:-13px; top:12px; width:22px; height:20px; }
+        .puff.pr { right:-13px; top:12px; width:22px; height:20px; }
+        .cloudb .face { top:13px; }
+        .cloudb .cheek { top:22px; }
+        /* 一つ目 */
+        .hakaseb { border-radius:50%; height: 50px; }
+        .bigeye { position:absolute; top:12px; left:50%; transform:translateX(-50%); width:22px; height:22px; background:#fff; border-radius:50%; box-shadow: inset 0 -2px 0 rgba(0,0,0,.06); }
+        .iris { position:absolute; top:6px; left:6px; width:10px; height:10px; background:#3B4A6B; border-radius:50%; display:block; animation: lookaround 5s ease-in-out infinite; }
+        .ring { position:absolute; bottom:24px; left:50%; transform:translateX(-50%) rotate(-8deg); width:76px; height:26px; border:3px solid rgba(255,255,255,.85); border-radius:50%; z-index:2; pointer-events:none; }
+        /* アンテナの精 */
+        .anteb { border-radius: 48%; }
+        .ant { position:absolute; bottom:50px; left:50%; transform:translateX(-50%); width:8px; height:18px; z-index:2; }
+        .antstem { position:absolute; left:3px; bottom:0; width:3px; height:12px; background:#5AB8B5; border-radius:2px; display:block; }
+        .antball { position:absolute; left:0; top:0; width:9px; height:9px; background:#FF8A7A; border-radius:50%; display:block; animation: twinkle 1.4s ease-in-out infinite; }
+        /* ロボットの精 */
+        .robob { border-radius: 26%; }
+        .screen { position:absolute; top:12px; left:50%; transform:translateX(-50%); width:32px; height:16px; background:#3B4252; border-radius:6px; display:flex; align-items:center; justify-content:center; gap:8px; }
+        .screen .px { width:5px; height:7px; background:#9FF2C4; border-radius:2px; animation: blink 4.2s infinite; display:block; }
+        .robob .cheek { top:31px; }
+        .antball.rb { background:#7ED6A5; }
+        /* 小判の精 */
+        .coinb { border-radius:50%; height:50px; border:4px solid rgba(255,255,255,.55); box-shadow: inset -5px -6px 0 rgba(0,0,0,.07); }
+        .coinb .face { top:13px; }
+        .coinb .cheek { top:22px; }
+        .yen { position:absolute; bottom:6px; left:0; right:0; text-align:center; font-size:11px; font-weight:900; color:rgba(74,63,53,.45); }
+        /* 星の精 */
+        .sorab {
+          width: 58px; height: 56px; bottom: 2px; box-shadow: none;
+          clip-path: polygon(50% 0%, 63% 32%, 98% 35%, 71% 56%, 80% 92%, 50% 72%, 20% 92%, 29% 56%, 2% 35%, 37% 32%);
+          filter: drop-shadow(0 0 6px rgba(255,211,122,.9));
+        }
+        .sface { top: 27px; gap: 9px; }
+        .cheek.sl { left: 15px; top: 36px; } .cheek.sr { right: 15px; top: 36px; }
+        /* 飾り */
+        .deco { position:absolute; z-index:3; font-size:11px; animation: twinkle 2.2s ease-in-out infinite; }
+        .heartd { top:-8px; right:4px; }
+        .stard { top:-2px; left:0; color:#fff; font-size:13px; }
+        .spark { top:-6px; right:-2px; }
+        .picked .blob { outline: 3px solid #fff; outline-offset: 2px; }
+        .picked .sorab { outline: none; filter: drop-shadow(0 0 5px #fff); }
+        .tag {
+          margin-top: 4px; font-size: 11px; font-weight: 700; background: #fff;
+          padding: 2px 8px; border-radius: 999px; box-shadow: 0 2px 0 rgba(0,0,0,.1); white-space: nowrap;
+        }
+        .bubble {
+          margin-bottom: 4px; background:#fff; font-size: 11px; font-weight:700;
+          padding: 4px 10px; border-radius: 12px; box-shadow: 0 2px 0 rgba(0,0,0,.1);
+          animation: pop .25s ease-out; white-space: nowrap;
+        }
+        .bubble.done { background:#DFF7E4; }
+        .bubble::after { content:''; position:absolute; left:50%; transform:translateX(-50%); border:5px solid transparent; border-top-color:#fff; margin-top:22px; }
+        .dots i { animation: dotup 1s infinite; display:inline-block; font-style:normal; }
+        .dots i:nth-child(2){ animation-delay:.2s } .dots i:nth-child(3){ animation-delay:.4s }
+        /* ===== デスク ===== */
+        .desk { position: relative; width: 78px; height: 52px; }
+        .mat { position:absolute; top:20px; left:6px; width:66px; height:6px; border-radius:3px; opacity:.55; }
+        .laptop { position:absolute; top:-8px; left:29px; font-size:20px; z-index:2; }
+        .deskitem { position:absolute; top:-6px; right:2px; font-size:15px; z-index:2; filter: drop-shadow(0 2px 0 rgba(0,0,0,.08)); }
+        .top { position:absolute; top:14px; left:0; width:78px; height:16px; background:#C98F5A; border-radius:8px;
+               box-shadow: 0 3px 0 #B07A47; border-bottom: 4px solid; }
+        .legs { position:absolute; top:32px; left:0; width:78px; display:flex; justify-content:space-between; padding:0 12px; }
+        .legs i { width:7px; height:18px; background:#B07A47; border-radius:0 0 4px 4px; }
+        /* ===== シート共通 ===== */
+        .sheet { flex:1; display:flex; flex-direction:column; background:#FFF9EF; border-top: 4px solid #EADFC8; min-height:0; }
+        .sheethead { display:flex; align-items:center; gap:10px; padding: 10px 14px; background:#FFF3DD; }
+        .avatar { width:34px; height:34px; border-radius:50%; display:flex; align-items:center; justify-content:center; font-size:17px; box-shadow: inset -3px -3px 0 rgba(0,0,0,.08); flex-shrink:0; }
+        .who b { font-size:14px; } .who small { display:block; font-size:11px; color:#9A8B77; }
+        .close { margin-left:auto; border:none; background:#EADFC8; color:#4A3F35; font-weight:900; border-radius:999px; width:30px; height:30px; font-size:14px; flex-shrink:0; }
+        .close ~ .close { margin-left:0; }
+        .msgs { flex:1; overflow-y:auto; padding: 12px 14px; display:flex; flex-direction:column; gap:10px; }
+        .msg { max-width: 82%; padding: 9px 12px; border-radius: 16px; font-size: 13.5px; line-height:1.65; white-space: pre-wrap; }
+        .msg.u { align-self:flex-end; background:#6FBF8E; color:#fff; border-bottom-right-radius:4px; }
+        .msg.a { align-self:flex-start; background:#fff; box-shadow: 0 2px 0 rgba(0,0,0,.06); border-bottom-left-radius:4px; }
+        .typing { align-self:flex-start; font-size:12px; color:#9A8B77; font-weight:700; }
+        .inputrow { display:flex; gap:8px; padding: 10px 12px calc(10px + env(safe-area-inset-bottom)); background:#FFF3DD; }
+        .inputrow input {
+          flex:1; border:3px solid #EADFC8; border-radius:999px; padding: 10px 14px;
+          font-family:inherit; font-size:14px; background:#fff; outline:none;
+        }
+        .inputrow input:focus { border-color:#6FBF8E; }
+        .inputrow button {
+          border:none; background:#FF8A7A; color:#fff; font-weight:900; font-family:inherit;
+          border-radius:999px; padding: 0 18px; font-size:14px; box-shadow: 0 3px 0 #E06B5C;
+        }
+        .inputrow button:disabled { opacity:.5; box-shadow:none; }
+        .hint { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px; color:#9A8B77; font-weight:700; font-size:14px; padding: 0 24px; text-align:center; }
+        .hint .big { font-size: 34px; }
+        /* ===== 出勤リスト ===== */
+        .rlist { flex:1; overflow-y:auto; padding: 8px 14px calc(12px + env(safe-area-inset-bottom)); display:flex; flex-direction:column; gap:8px; }
+        .rrow { display:flex; align-items:center; gap:10px; background:#fff; border-radius:14px; padding:8px 10px; box-shadow: 0 2px 0 rgba(0,0,0,.06); }
+        .rrow .who { flex:1; }
+        .togl { border:none; font-family:inherit; font-weight:900; font-size:12px; border-radius:999px; padding: 6px 12px; }
+        .togl.on { background:#6FBF8E; color:#fff; box-shadow: 0 2px 0 #57A576; }
+        .togl.off { background:#EADFC8; color:#9A8B77; }
+        @keyframes floaty { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-6px)} }
+        @keyframes glidey { 0%,100%{transform:translateY(-2px) rotate(-4deg)} 50%{transform:translateY(-9px) rotate(4deg)} }
+        @keyframes shpulse { 0%,100%{transform:translateX(-50%) scale(1);opacity:.9} 50%{transform:translateX(-50%) scale(.75);opacity:.55} }
+        @keyframes sway { 0%,100%{transform:translateY(0)} 50%{transform:translateY(3px)} }
+        @keyframes leafwiggle { 0%,100%{transform:translateX(-50%) rotate(-45deg)} 50%{transform:translateX(-50%) rotate(-30deg)} }
+        @keyframes lookaround { 0%,20%,100%{transform:translate(0,0)} 40%{transform:translate(3px,0)} 70%{transform:translate(-3px,1px)} }
+        @keyframes twinkle { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.45;transform:scale(.85)} }
+        @keyframes blink { 0%,94%,100%{transform:scaleY(1)} 97%{transform:scaleY(.1)} }
+        @keyframes pop { from{transform:scale(.6);opacity:0} to{transform:scale(1);opacity:1} }
+        @keyframes dotup { 0%,100%{transform:translateY(0)} 50%{transform:translateY(-3px)} }
+        @media (prefers-reduced-motion: reduce) {
+          .hover,.glide .hover,.eye,.dots i,.bumps i,.deco,.iris,.shadow,.sprout .leaf,.ftip,.antball { animation: none; }
+          .spot { transition: none; }
+        }
+      `}</style>
+
+      <div className="head">
+        <h1>🏢 ナナデザインラボ<span className="sub">AI OFFICE</span></h1>
+        <button className="staffbtn" onClick={() => { setTaskOpen(!taskOpen); setRoster(false); setSelected(null); }}>
+          📋 {tasks.filter(t => !t.done).length}
+        </button>
+        <button className="staffbtn" onClick={openMeeting}>🪑</button>
+        <button className="staffbtn" onClick={() => { setRoster(!roster); setSelected(null); }}>
+          👥 {active.length}人
+        </button>
+        <div className="clock">🕐 {clock}</div>
+      </div>
+
+      <div className={"sceneclip" + (expand && (sel || meeting || roster || taskOpen) ? " small" : "")}>
+      <div className="scene">
+        <div className="lamp" style={{ left: "27%" }} />
+        <div className="lamp" style={{ left: "73%" }} />
+        <div className="window" style={{ left: "5%" }} />
+        <div className="window" style={{ right: "5%" }} />
+        <div className="wboard"><i /><i /><i /></div>
+        <div className="wallclock" />
+        <div className="floor">
+          <div className="rug" onClick={openMeeting} />
+        </div>
+        <div className="stage">
+          <Prop x={7} y={46} cls="shelf">
+            <div className="row"><i style={{background:"#FF9EB3"}}/><i style={{background:"#8FB8FF"}}/><i style={{background:"#FFD37A"}}/><i style={{background:"#7ED6A5"}}/></div>
+            <div className="row"><i style={{background:"#C3B3F2"}}/><i style={{background:"#FF9B6B"}}/><i style={{background:"#A5D8C8"}}/></div>
+          </Prop>
+          <Prop x={95} y={52} cls="plantp">🪴</Prop>
+          <Prop x={4} y={83} cls="plantp">🪴</Prop>
+          <Prop x={20} y={85} cls="cabinet"><i /><i /><i /></Prop>
+          <Prop x={80} y={85} cls="watercooler">
+            <div className="bottle" />
+            <div className="base" />
+          </Prop>
+          <Prop x={97} y={83} cls="coffee">
+            <div className="cup">☕</div>
+            <div className="ctop" />
+            <div className="cleg" />
+          </Prop>
+          {activeStaff.map((s, i) => (
+            <Desk key={s.id + "d"} x={DESK_SLOTS[i].x} y={DESK_SLOTS[i].y} staff={s} onClick={() => pickStaff(s.id)} />
+          ))}
+          {activeStaff.map((s) => (
+            <Chara
+              key={s.id}
+              staff={s}
+              pos={chars[s.id]}
+              status={chars[s.id].status}
+              moving={chars[s.id].moving}
+              say={chars[s.id].say}
+              selected={selected === s.id}
+              onClick={() => pickStaff(s.id)}
+            />
+          ))}
+        </div>
+      </div>
+      </div>
+
+      {taskOpen ? (
+        <div className="sheet">
+          <div className="sheethead">
+            <div className="avatar" style={{ background: "#FFD37A" }}>📋</div>
+            <div className="who">
+              <b>タスク</b>
+              <small>締切が来たら担当の子が相談に来るよ</small>
+            </div>
+            <button className="close" onClick={() => setExpand(!expand)}>{expand ? "▼" : "▲"}</button>
+            <button className="close" onClick={() => setTaskOpen(false)}>✕</button>
+          </div>
+          <div className="msgs" ref={listRef}>
+            <div style={{ padding: "12px 14px", borderBottom: "1px solid #EADFC8" }}>
+              <div style={{ display: "flex", gap: "8px", marginBottom: "8px" }}>
+                <input
+                  value={tTitle}
+                  onChange={(e) => setTTitle(e.target.value)}
+                  placeholder="やることを入力…"
+                  style={{ flex: 1, borderRadius: "6px", border: "2px solid #EADFC8", padding: "6px 8px", fontFamily: "inherit", fontSize: "13px" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+                <input
+                  type="datetime-local"
+                  value={tDue}
+                  onChange={(e) => setTDue(e.target.value)}
+                  style={{ flex: 1, borderRadius: "6px", border: "2px solid #EADFC8", padding: "6px 8px", fontFamily: "inherit", fontSize: "12px" }}
+                />
+              </div>
+              <div style={{ display: "flex", gap: "6px", marginBottom: "8px" }}>
+                <select
+                  value={tWho}
+                  onChange={(e) => setTWho(e.target.value)}
+                  style={{ flex: 1, borderRadius: "6px", border: "2px solid #EADFC8", padding: "6px 8px", fontFamily: "inherit", fontSize: "13px" }}
+                >
+                  <option value="">担当を選ぶ…</option>
+                  {STAFF.map((s) => (
+                    <option key={s.id} value={s.id}>{s.emoji} {s.name}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={() => {
+                    if (!tTitle.trim() || !tDue || !tWho) return;
+                    setTasks((tt) => [...tt, { id: Date.now(), title: tTitle, due: tDue, staffId: tWho, done: false, warnedAt: {} }]);
+                    setTTitle("");
+                    setTDue("");
+                    setTWho("");
+                  }}
+                  style={{ borderRadius: "6px", border: "none", background: "#FF8A7A", color: "#fff", fontWeight: "900", padding: "6px 12px", fontSize: "13px", fontFamily: "inherit" }}
+                  disabled={!tTitle.trim() || !tDue || !tWho}
+                >
+                  追加
+                </button>
+              </div>
+            </div>
+            {tasks.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "20px", color: "#9A8B77", fontSize: "13px" }}>
+                タスクをいま登録すると、締切が迫ったら担当の子が教えてくれるよ
+              </div>
+            ) : (
+              tasks.map((t) => {
+                const st = STAFF.find((s) => s.id === t.staffId);
+                const due = new Date(t.due);
+                const now = new Date();
+                const hoursLeft = (due - now) / 3600000;
+                const status = t.done ? "完了" : hoursLeft < 1 ? "超過" : hoursLeft < 24 ? "緊急" : "進行中";
+                return (
+                  <div key={t.id} className="taskrow" style={{ opacity: t.done ? 0.55 : 1 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: "13px", fontWeight: "700", marginBottom: "2px", textDecoration: t.done ? "line-through" : "none" }}>
+                        {t.title}
+                      </div>
+                      <div style={{ fontSize: "11px", color: "#9A8B77", marginBottom: "4px" }}>
+                        {st.emoji} {st.name} • {due.toLocaleDateString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })}
+                      </div>
+                      <div style={{ fontSize: "10px", display: "inline-block", padding: "2px 6px", borderRadius: "3px", 
+                        background: status === "超過" ? "#FFD4CC" : status === "緊急" ? "#FFE9C7" : status === "完了" ? "#DFF7E4" : "#F5F5F5",
+                        color: status === "超過" ? "#E06B5C" : status === "緊急" ? "#D89A3D" : status === "完了" ? "#57A576" : "#9A8B77"
+                      }}>
+                        {status}
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setTasks((tt) => tt.map((tsk) => tsk.id === t.id ? { ...tsk, done: !tsk.done } : tsk))}
+                      style={{ borderRadius: "50%", border: "2px solid #EADFC8", background: t.done ? "#DFF7E4" : "#fff", color: "#9A8B77", fontWeight: "900", width: "32px", height: "32px", fontSize: "14px", fontFamily: "inherit" }}
+                    >
+                      {t.done ? "✓" : "○"}
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      ) : meeting ? (
+        <div className="sheet">
+          <div className="sheethead">
+            <div className="avatar" style={{ background: "#A5D8C8" }}>🪑</div>
+            <div className="who">
+              <b>全体会議</b>
+              <small>{meeting.phase === "input" ? `出勤中の${active.length}人が参加するよ` : meeting.topic}</small>
+            </div>
+            <button className="close" onClick={() => setExpand(!expand)}>{expand ? "▼" : "▲"}</button>
+            <button className="close" onClick={closeMeeting}>✕</button>
+          </div>
+          {meeting.phase === "input" ? (
+            <>
+              <div className="hint">
+                <div className="big">🪑</div>
+                <div>議題を入れると、みんながラグに集まって<br />専門の目線で順番に意見をくれるよ</div>
+              </div>
+              <div className="inputrow">
+                <input
+                  value={mtopic}
+                  onChange={(e) => setMtopic(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && startMeeting()}
+                  placeholder="議題(例:新サービスの名前どうする?)"
+                />
+                <button onClick={startMeeting} disabled={!mtopic.trim()}>開始!</button>
+              </div>
+            </>
+          ) : (
+            <div className="msgs" ref={listRef}>
+              {meeting.log.map((l, i) => {
+                const st = STAFF.find((s) => s.id === l.id);
+                return (
+                  <div key={i} className={"mrow" + (l.sum ? " sum" : "")}>
+                    <div className="avatar" style={{ background: st.body }}>{st.emoji}</div>
+                    <div className="mtext"><b>{st.name}{l.sum ? "(まとめ)" : ""}</b>{l.text}</div>
+                  </div>
+                );
+              })}
+              {meeting.phase === "running" && (
+                <div className="typing">
+                  {meeting.speakingId
+                    ? `${STAFF.find((s) => s.id === meeting.speakingId).name}が発言中…💬`
+                    : "みんな集合中…"}
+                </div>
+              )}
+              {meeting.phase === "done" && (
+                <button className="endmeet" onClick={closeMeeting}>会議おわり!解散〜</button>
+              )}
+            </div>
+          )}
+        </div>
+      ) : sel ? (
+        <div className="sheet">
+          <div className="sheethead">
+            <div className="avatar" style={{ background: sel.body }}>{sel.emoji}</div>
+            <div className="who">
+              <b>{sel.name}</b>
+              <small>{sel.role}担当{sel.useSearch ? "・Web検索できる" : ""}</small>
+            </div>
+            <button className="close" onClick={() => setExpand(!expand)}>{expand ? "▼" : "▲"}</button>
+            <button className="close" onClick={() => setSelected(null)}>✕</button>
+          </div>
+          <div className="msgs" ref={listRef}>
+            {(chats[sel.id] || []).length === 0 && (
+              <div className="msg a">
+                やっほー、{sel.name}だよ!{sel.role}のことなら任せて。何をお願いする?
+              </div>
+            )}
+            {(chats[sel.id] || []).map((m, i) => (
+              <div key={i} className={"msg " + (m.role === "user" ? "u" : "a")}>{m.content}</div>
+            ))}
+            {busy[sel.id] && <div className="typing">{sel.name}が作業中…⚙️</div>}
+          </div>
+          <div className="inputrow">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && send()}
+              placeholder={`${sel.name}に指示を出す…`}
+            />
+            <button onClick={send} disabled={busy[sel.id] || !input.trim()}>頼む!</button>
+          </div>
+        </div>
+      ) : roster ? (
+        <div className="sheet">
+          <div className="sheethead">
+            <div className="avatar" style={{ background: "#EADFC8" }}>👥</div>
+            <div className="who"><b>社員名簿</b><small>出勤/休みを切り替えられるよ(最大{STAFF.length}人)</small></div>
+            <button className="close" onClick={() => setExpand(!expand)}>{expand ? "▼" : "▲"}</button>
+            <button className="close" onClick={() => setRoster(false)}>✕</button>
+          </div>
+          <div className="rlist">
+            {STAFF.map((s) => {
+              const on = active.includes(s.id);
+              return (
+                <div className="rrow" key={s.id}>
+                  <div className="avatar" style={{ background: s.body }}>{s.emoji}</div>
+                  <div className="who"><b>{s.name}</b><small>{s.role}{s.useSearch ? "・Web検索OK" : ""}</small></div>
+                  <button className={"togl " + (on ? "on" : "off")} onClick={() => toggleStaff(s.id)}>
+                    {on ? "出勤中" : "休み"}
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : (
+        <div className="hint">
+          <div className="big">👆</div>
+          <div>社員をタップして指示を出してみて!</div>
+          <div style={{ fontSize: 12, fontWeight: 500 }}>
+            右上の「👥」から社員を出勤させたり休ませたりできるよ
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<AIOffice />);
+  </script>
+</body>
+</html>
